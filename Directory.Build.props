@@ -22,8 +22,9 @@
         <!-- <DefineConstants>DEBUG;SOLVERTRACE</DefineConstants> -->
 
         <!-- Properties used by KSPBuildTools -->
-        <GameDataOutDir>$(ProjectRootDir)\GameData\000_KSPPluginLoader</GameDataOutDir>
-        <BinariesOutputRelativePath>GameData\000_KSPPluginLoader\Plugins</BinariesOutputRelativePath>
+        <GameDataSubDir>000_PluginLoader</GameDataSubDir>
+        <GameDataOutDir>$(ProjectRootDir)\GameData\$(GameDataSubDir)</GameDataOutDir>
+        <BinariesOutputRelativePath>GameData\$(GameDataSubDir)\Plugins</BinariesOutputRelativePath>
     </PropertyGroup>
 
     <Import
@@ -41,7 +42,7 @@
     -->
     <PropertyGroup Condition=" '$(SolutionDir)' == '' ">
         <SolutionDir>$(ProjectRootDir)</SolutionDir>
-        <SolutionName>BackgroundResourceProcessing</SolutionName>
+        <SolutionName>KSPPluginLoader</SolutionName>
         <SolutionExt>.sln</SolutionExt>
         <SolutionFileName>$(SolutionName)$(SolutionExt)</SolutionFileName>
         <SolutionPath>$(SolutionDir)/$(SolutionFileName)</SolutionPath>
@@ -72,7 +73,7 @@
         <SteamKSPRoot Condition="($([MSBuild]::IsOsPlatform('OSX')))">$(HOME)/Library/Application Support/Steam/steamapps/common/Kerbal Space Program</SteamKSPRoot>
 
         <RepoRootPath>$(ProjectRootDir)</RepoRootPath>
-        <BinariesOutputRelativePath>GameData/$(SolutionName)/Plugins</BinariesOutputRelativePath>
+        <BinariesOutputRelativePath>GameData/$(GameDataSubDir)/Plugins</BinariesOutputRelativePath>
     </PropertyGroup>
 
     <!-- Source KSP root from an env variable in CI -->
