@@ -41,6 +41,8 @@ internal static class PluginLoader
         var version = (int)ListVersion.GetValue(assemblies);
         var availableAssemblies = (List<AssemblyInfo>)AvailableAssemblies.GetValue(null);
 
+        // Everything <= this index has already been loaded and should not be
+        // modified by us.
         var index = FindCurrentAssemblyIndex(assemblies);
         if (index < 0)
             throw new Exception("PluginLoader assembly not present in the list of assemblies");
