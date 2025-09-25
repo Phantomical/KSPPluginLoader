@@ -9,4 +9,6 @@ internal static class KeyValuePairExt
         key = pair.Key;
         value = pair.Value;
     }
+
+    internal static KeyValuePair<K, V> Create<K, V>(K key, V value) => new(key, value);
 }
