@@ -36,10 +36,6 @@ jobs:
           unzip -q D:\\ksp.zip -d ${{ env.KSP_ROOT }}
         shell: bash
 
-      - name: Install CKAN dependencies
-        shell: bash
-        run: ./ckan.exe install --asroot --headless --no-recommends --ckanfiles dependencies.ckan
-
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0'
