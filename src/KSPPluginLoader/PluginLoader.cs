@@ -144,6 +144,8 @@ internal static class PluginLoader
         bool satisfied = true;
         foreach (var dependency in assembly.dependencies)
         {
+            bool couldHaveBeenSatisfied = false;
+
             foreach (var loadedAssembly in loadedAssemblies)
             {
                 if (ReferenceEquals(assembly, loadedAssembly))
@@ -156,13 +158,19 @@ internal static class PluginLoader
                     if (!IsVersionCompatible(loadedAssembly, dependency))
                         continue;
                 }
-                else if (allowNonKspDeps)
+                else
                 {
                     if (!infos.TryGetValue(loadedAssembly, out var info))
                         continue;
 
                     if (!IsVersionCompatible(info.assemblyVersion, dependency))
                         continue;
+
+                    if (!allowNonKspDeps)
+                    {
+                        couldHaveBeenSatisfied = true;
+                        continue;
+                    }
                 }
 
                 dependency.met = true;
@@ -170,10 +178,21 @@ internal static class PluginLoader
                 goto SATISFIED;
             }
 
-            Debug.LogWarning(
-                $"PluginLoader: Assembly '{assembly.name}' has not met dependency "
-                    + $"'{dependency.name}' V{dependency.versionMajor}.{dependency.versionMinor}.{dependency.versionRevision}"
-            );
+            if (couldHaveBeenSatisfied)
+            {
+                Debug.LogWarning(
+                    $"PluginLoader: Assembly '{assembly.name}' could have met dependency "
+                        + $"'{dependency.name}' V{dependency.versionMajor}.{dependency.versionMinor}.{dependency.versionRevision} "
+                        + $"if it had a KSPAssemblyDependency on KSPPluginLoader"
+                );
+            }
+            else
+            {
+                Debug.LogWarning(
+                    $"PluginLoader: Assembly '{assembly.name}' has not met dependency "
+                        + $"'{dependency.name}' V{dependency.versionMajor}.{dependency.versionMinor}.{dependency.versionRevision}"
+                );
+            }
 
             satisfied = false;
 
