@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices.ComTypes;
 using Mono.Cecil;
 using UnityEngine;
 using static AssemblyLoader;
@@ -62,16 +63,14 @@ internal static class PluginLoader
             }
         }
 
+        var infos = CreateInfoMap(assemblies, availableAssemblies);
         for (int i = 0; i < assemblies.Count; ++i)
         {
             if (i <= index)
                 continue;
 
             var assembly = assemblies[i];
-            SetDependenciesMet.Invoke(
-                assembly,
-                [CheckDependencies(assembly, assemblies, availableAssemblies)]
-            );
+            SetDependenciesMet.Invoke(assembly, [CheckDependencies(assembly, assemblies, infos)]);
         }
 
         var tail = new List<LoadedAssembly>(assemblies.Skip(index + 1));
@@ -114,8 +113,7 @@ internal static class PluginLoader
         return -1;
     }
 
-    static bool CheckDependencies(
-        LoadedAssembly assembly,
+    static Dictionary<LoadedAssembly, AssemblyInfo> CreateInfoMap(
         List<LoadedAssembly> loadedAssemblies,
         List<AssemblyInfo> availableAssemblies
     )
@@ -133,6 +131,16 @@ internal static class PluginLoader
             }
         }
 
+        return infos;
+    }
+
+    static bool CheckDependencies(
+        LoadedAssembly assembly,
+        List<LoadedAssembly> loadedAssemblies,
+        Dictionary<LoadedAssembly, AssemblyInfo> infos
+    )
+    {
+        bool allowNonKspDeps = DependsOnPluginLoader(assembly);
         bool satisfied = true;
         foreach (var dependency in assembly.dependencies)
         {
@@ -148,7 +156,7 @@ internal static class PluginLoader
                     if (!IsVersionCompatible(loadedAssembly, dependency))
                         continue;
                 }
-                else
+                else if (allowNonKspDeps)
                 {
                     if (!infos.TryGetValue(loadedAssembly, out var info))
                         continue;
@@ -203,6 +211,17 @@ internal static class PluginLoader
     static bool IsMissingKSPAssembly(LoadedAssembly assembly) =>
         assembly.versionMajor == 0 && assembly.versionMinor == 0 && assembly.versionRevision == 0;
 
+    static bool DependsOnPluginLoader(LoadedAssembly assembly)
+    {
+        foreach (var dep in assembly.dependencies)
+        {
+            if (dep.name == "KSPPluginLoader")
+                return true;
+        }
+
+        return false;
+    }
+
     static List<LoadedAssembly> TSort(
         IEnumerable<LoadedAssembly> source,
         IEnumerable<LoadedAssembly> loadedAssemblies
@@ -246,23 +265,26 @@ internal static class PluginLoader
             }
         }
 
-        var constraints = LoadAssemblyConstraints(assembly);
-        if (constraints is null)
+        if (DependsOnPluginLoader(assembly))
         {
-            Debug.LogWarning(
-                $"PluginLoader: Assembly '{assembly.name}' is not being loaded because its attributes could not be parsed."
-            );
-            return false;
-        }
-
-        foreach (var constraint in constraints)
-        {
-            if (!constraint.IsSatisfied(assembly))
+            var constraints = LoadAssemblyConstraints(assembly);
+            if (constraints is null)
             {
                 Debug.LogWarning(
-                    $"PluginLoader: Assembly '{assembly.name}' is not being loaded because constraint `{constraint}` is not satisfied."
+                    $"PluginLoader: Assembly '{assembly.name}' is not being loaded because its attributes could not be parsed."
                 );
                 return false;
+            }
+
+            foreach (var constraint in constraints)
+            {
+                if (!constraint.IsSatisfied(assembly))
+                {
+                    Debug.LogWarning(
+                        $"PluginLoader: Assembly '{assembly.name}' is not being loaded because constraint `{constraint}` is not satisfied."
+                    );
+                    return false;
+                }
             }
         }
 
