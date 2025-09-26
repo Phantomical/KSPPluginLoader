@@ -81,7 +81,11 @@ internal static class PluginLoader
         // We sort by path so that the new dependencies we are adding here are
         // in the same order they would be if KSP itself was actually loading
         // them.
-        tail.Sort((a, b) => a.path.CompareTo(b.path));
+        //
+        // Note that we use linq here because List.Sort is not a stable sort.
+        // If we don't do this we may end up printing extra log messages for
+        // assemblies that have already been validated by KSP.
+        tail = [.. tail.OrderBy(assembly => assembly.path)];
 
         var sorted = TSort(tail, loadedAssemblies);
         assemblies.AddRange(sorted);
