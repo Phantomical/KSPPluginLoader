@@ -7,30 +7,46 @@ If you are not a mod author then this will show as a dependency of some other
 mod you have installed and you can otherwise ignore it.
 
 ## How to Use
-1. Add the following assembly attribute to your mod
+1. Add a dependency on `KSPPluginLoader`.
    ```cs
    [assembly: KSPAssemblyDependency("KSPPluginLoader", 1, 0)]
    ```
-2. Add further `KSPAssemblyDependency` attributes for any other mods that you
-   want to depend on, regardless of whether they have a `KSPAssembly` attribute
-   or not.
+   Dependencies on mods without a `KSPAssembly` attribute will not be resolved
+   unless your mod DLL has this dependency.
+2. Add `KSPAssemblyDependency` attributes for any other mods that you want to
+   depend on. See the next section to pick the right version.
 
 #### Figuring out the version to use
-Once KSP has loaded mods it prints a section that starts with
-```
-Mod DLLs found:
-```
-to `KSP.log`. Within, you'll see a list of DLL names and their versions in one
-of the following formats:
-```
-KSPBurst v1.5.5.2
-Kopernicus v1.0.0.0 / v1.12.227.0
-ContractConfigurator v1.0.0.0 / v2.11.2.0 KSP-RO / v2.11.2.0
-```
-In each case, you want to use the _last_ version number that is printed in your
-`KSPAssemblyAttribute`. So if you wanted to depend on the latest version (or any
-newer version) of each of the mods above you would add these attributes to your
-mod DLL:
+1. Open up `KSP.log` in your KSP directory.
+2. Look up the `AssemblyLoader` log messages for your mod. They should look
+   something like this:
+   ```
+   AssemblyLoader: Loading assembly at C:\KSP\GameData\ModuleManager.4.2.3.dll
+   AssemblyLoader: KSPAssembly 'ModuleManager' V2.5.0
+   ```
+3. If there is a `KSPAssembly` message, then that's the version you should be
+   using. If all your dependencies have a `KSPAssembly` message, then you
+   don't actually need `KSPPluginLoader` (unless you're making use of the
+   advanced use cases section below).
+4. Otherwise, scroll on down to the section that starts with
+   ```
+   Mod DLLs found:
+   ```
+5. Find the entry for the mod you want to depend on. It should look something
+   like this:
+   ```
+   KSPBurst v1.5.5.2
+   Kopernicus v1.0.0.0 / v1.12.227.0
+   ContractConfigurator v1.0.0.0 / v2.11.2.0 KSP-RO / v2.11.2.0
+   ```
+6. The version number you want is the _last_ version number after the mod
+   name, since that is the version that `KSPPluginLoader` will use.
+   You only need to care about the version number so you can ignore any text
+   after the `+` in the version.
+
+
+As an example, here's what the dependencies would look like for latest versions
+of the three mods in step 5.
 ```cs
 [assembly: KSPAssemblyDependency("KSPBurst", 1, 5, 5)]
 [assembly: KSPAssemblyDependency("Kopernicus", 1, 12, 227)]
@@ -38,15 +54,25 @@ mod DLL:
 ```
 
 ## Advanced Use Cases
-This mod also introduces some new attributes you can use in order to express
-more advanced dependency relationships.
+To support more advanced use cases, KSPPluginLoader also has some extra
+assembly attributes you can use.
 
-To use these you will need to actually depend on the `KSPPluginLoader` DLL.
+To use these you will need to actually depend on `KSPPluginLoader.dll`.
+They also will not be checked unless your mod DLL has a `KSPAssemblyDependency`
+attribute for `KSPPluginLoader`.
 
-### `KSPAssemblyDependencyMax`
-This allows you to specify the maximum version of a dependency that your mod
-supports. If the loaded dependency version is >= than the one specified here
-then your mod assembly will not be loaded.
+### Maximum dependency version constraint
+Sometimes you have some code that only works with a small range of mod
+versions. `KSPAssemblyDependency` only lets you set a lower bound, so this
+mod introduces a `KSPAssemblyDependencyMax` assembly attribute that lets
+you set an upper bound on the dependency version.
+
+Declaring it works pretty much the same as `KSPAssemblyDependency`.
+This would only allow your mod to be loaded if `SomeMod`'s version is
+< 1.0.0.
+```cs
+[assembly: KSPAssemblyDependencyMax("SomeMod", 1, 0, 0)]
+```
 
 As an example, the following two attributes would ensure your mod is only
 loaded if a version of `PersistentThrust` in the range v1.7.5 <= v < v1.8.0
@@ -57,6 +83,17 @@ using KSPPluginLoader;
 [assembly: KSPAssemblyDependency("PersistentThrust", 1, 7, 5)]
 [assembly: KSPAssemblyDependencyMax("PersistentThrust", 1, 8, 0)]
 ```
+
+Some things to be aware of when using `KSPAssemblyDependencyMax`:
+* It does not affect the order that assemblies are loaded in. Make sure to
+  pair it with an appropriate `KSPAssemblyDependency` if your mod DLL actually
+  uses the dependency DLL.
+* If there are multiple DLLs with the same name are present then KSP will only
+  load one of them. This happens before constraints like
+  `KSPAssemblyDependencyMax` are taken into account and means that you cannot
+  have multiple DLLs with the same `KSPAssembly` name that use 
+  `KSPAssemblyDependencyMax` to only allow one to load. You can still make this
+  work, however, as long as the DLLs have different names.
 
 ## Examples
 ### Depending on CryoTanks
