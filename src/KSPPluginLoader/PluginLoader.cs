@@ -50,7 +50,6 @@ internal static class PluginLoader
 
         Debug.Log("PluginLoader: Updating assembly list");
 
-        var oldCount = assemblies.Count;
         HashSet<LoadedAssembly> known = [.. assemblies];
         using (var guard = new SilenceLogging())
         {
@@ -78,6 +77,11 @@ internal static class PluginLoader
         var tail = new List<LoadedAssembly>(assemblies.Skip(index + 1));
         assemblies.RemoveRange(index + 1, assemblies.Count - (index + 1));
         tail.RemoveAll(assembly => loadedAssemblies.Contains(assembly.name));
+
+        // We sort by path so that the new dependencies we are adding here are
+        // in the same order they would be if KSP itself was actually loading
+        // them.
+        tail.Sort((a, b) => a.path.CompareTo(b.path));
 
         var sorted = TSort(tail, loadedAssemblies);
         assemblies.AddRange(sorted);
