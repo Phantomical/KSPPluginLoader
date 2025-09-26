@@ -47,6 +47,7 @@ internal static class PluginLoader
         if (index < 0)
             throw new Exception("PluginLoader assembly not present in the list of assemblies");
 
+        var oldCount = assemblies.Count;
         using (var guard = new SilenceLogging())
         {
             foreach (var file in GameDatabase.Instance.root.GetFiles(UrlDir.FileType.Assembly))
@@ -56,25 +57,31 @@ internal static class PluginLoader
 
                 LoadPlugin(new FileInfo(file.fullPath), file.parent.url, node);
             }
+        }
 
-            for (int i = 0; i < assemblies.Count; ++i)
-            {
-                if (i <= index)
-                    continue;
+        for (int i = 0; i < assemblies.Count; ++i)
+        {
+            if (i <= index)
+                continue;
 
-                var assembly = assemblies[i];
-                SetDependenciesMet.Invoke(
-                    assembly,
-                    [CheckDependencies(assembly, assemblies, availableAssemblies)]
-                );
-            }
+            var assembly = assemblies[i];
+            SetDependenciesMet.Invoke(
+                assembly,
+                [CheckDependencies(assembly, assemblies, availableAssemblies)]
+            );
+        }
 
-            var tail = new List<LoadedAssembly>(assemblies.Skip(index + 1));
-            assemblies.RemoveRange(index + 1, assemblies.Count - (index + 1));
-            tail.RemoveAll(assembly => loadedAssemblies.Contains(assembly.name));
+        var tail = new List<LoadedAssembly>(assemblies.Skip(index + 1));
+        assemblies.RemoveRange(index + 1, assemblies.Count - (index + 1));
+        tail.RemoveAll(assembly => loadedAssemblies.Contains(assembly.name));
 
-            var sorted = TSort(tail, loadedAssemblies);
-            assemblies.AddRange(sorted);
+        var sorted = TSort(tail, loadedAssemblies);
+        assemblies.AddRange(sorted);
+
+        for (int i = oldCount; i < assemblies.Count; ++i)
+        {
+            var assembly = assemblies[i];
+            Debug.Log($"PluginLoader: Loading assembly at {assembly.path}");
         }
 
         ListVersion.SetValue(assemblies, version);
@@ -113,6 +120,7 @@ internal static class PluginLoader
             }
         }
 
+        bool satisfied = true;
         foreach (var dependency in assembly.dependencies)
         {
             foreach (var loadedAssembly in loadedAssemblies)
@@ -141,13 +149,18 @@ internal static class PluginLoader
                 goto SATISFIED;
             }
 
-            return false;
+            Debug.LogWarning(
+                $"PluginLoader: Assembly '{assembly.name}' has not met dependency "
+                    + $"'{dependency.name}' V{dependency.versionMajor}.{dependency.versionMinor}.{dependency.versionRevision}"
+            );
+
+            satisfied = false;
 
             SATISFIED:
             ;
         }
 
-        return true;
+        return satisfied;
     }
 
     static bool IsVersionCompatible(LoadedAssembly assembly, AssemblyDependency dependency)
@@ -210,7 +223,14 @@ internal static class PluginLoader
         foreach (var dep in assembly.deps)
         {
             if (!Visit(dep, visited, sorted))
+            {
+                Debug.LogWarning(
+                    $"PluginLoader: Assembly '{assembly.name}' has not met dependency "
+                        + $"'{dep.name}' V{dep.versionMajor}.{dep.versionMinor}.{dep.versionRevision}"
+                );
+
                 return false;
+            }
         }
 
         sorted.Add(assembly);
