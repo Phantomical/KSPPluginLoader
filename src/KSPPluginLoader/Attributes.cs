@@ -59,7 +59,7 @@ internal static class AttributeLoader
 /// of dependency versions. (e.g. one integration for versions 1.5 to 1.7, and
 /// another for versions 1.7+).
 /// </remarks>
-[AttributeUsage(AttributeTargets.Assembly)]
+[AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
 public sealed class KSPAssemblyDependencyMaxAttribute(
     string name,
     int major,
