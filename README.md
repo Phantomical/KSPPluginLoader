@@ -15,5 +15,24 @@ mod you have installed and you can otherwise ignore it.
    want to depend on, regardless of whether they have a `KSPAssembly` attribute
    or not.
 
-   If they have a `KSPAssembly` attribute then the version number within will
-   be used, otherwise the version number of the assembly will be used.
+#### Figuring out the version to use
+Once KSP has loaded mods it prints a section that starts with
+```
+Mod DLLs found:
+```
+to `KSP.log`. Within, you'll see a list of DLL names and their versions in one
+of the following formats:
+```
+KSPBurst v1.5.5.2
+Kopernicus v1.0.0.0 / v1.12.227.0
+ContractConfigurator v1.0.0.0 / v2.11.2.0 KSP-RO / v2.11.2.0
+```
+In each case, you want to use the _last_ version number that is printed in your
+`KSPAssemblyAttribute`. So if you wanted to depend on the latest version (or any
+newer version) of each of the mods above you would add these attributes to your
+mod DLL:
+```cs
+[assembly: KSPAssemblyDependency("KSPBurst", 1, 5, 5)]
+[assembly: KSPAssemblyDependency("Kopernicus", 1, 12, 227)]
+[assembly: KSPAssemblyDependency("ContractConfigurator", 2, 11, 2)]
+```
