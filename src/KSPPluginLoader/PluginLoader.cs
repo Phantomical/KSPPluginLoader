@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using Mono.Cecil;
 using UnityEngine;
 using static AssemblyLoader;
 
@@ -47,7 +48,10 @@ internal static class PluginLoader
         if (index < 0)
             throw new Exception("PluginLoader assembly not present in the list of assemblies");
 
+        Debug.Log("PluginLoader: Updating assembly list");
+
         var oldCount = assemblies.Count;
+        HashSet<LoadedAssembly> known = [.. assemblies];
         using (var guard = new SilenceLogging())
         {
             foreach (var file in GameDatabase.Instance.root.GetFiles(UrlDir.FileType.Assembly))
@@ -78,9 +82,10 @@ internal static class PluginLoader
         var sorted = TSort(tail, loadedAssemblies);
         assemblies.AddRange(sorted);
 
-        for (int i = oldCount; i < assemblies.Count; ++i)
+        foreach (var assembly in assemblies)
         {
-            var assembly = assemblies[i];
+            if (known.Contains(assembly))
+                continue;
             Debug.Log($"PluginLoader: Loading assembly at {assembly.path}");
         }
 
@@ -233,9 +238,35 @@ internal static class PluginLoader
             }
         }
 
+        var constraints = LoadAssemblyConstraints(assembly);
+        if (constraints is null)
+        {
+            Debug.LogWarning(
+                $"PluginLoader: Assembly '{assembly.name}' is not being loaded because its attributes could not be parsed."
+            );
+            return false;
+        }
+
+        foreach (var constraint in constraints)
+        {
+            if (!constraint.IsSatisfied(assembly))
+            {
+                Debug.LogWarning(
+                    $"PluginLoader: Assembly '{assembly.name}' is not being loaded because constraint `{constraint}` is not satisfied."
+                );
+                return false;
+            }
+        }
+
         sorted.Add(assembly);
         visited[assembly.path] = true;
         return true;
+    }
+
+    static List<IAssemblyConstraint> LoadAssemblyConstraints(LoadedAssembly assembly)
+    {
+        var def = AssemblyDefinition.ReadAssembly(assembly.path);
+        return AttributeLoader.LoadAttributes(def);
     }
 
     static void LogAssemblies(string header, List<LoadedAssembly> assemblies)
