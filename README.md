@@ -36,3 +36,45 @@ mod DLL:
 [assembly: KSPAssemblyDependency("Kopernicus", 1, 12, 227)]
 [assembly: KSPAssemblyDependency("ContractConfigurator", 2, 11, 2)]
 ```
+
+## Advanced Use Cases
+This mod also introduces some new attributes you can use in order to express
+more advanced dependency relationships.
+
+To use these you will need to actually depend on the `KSPPluginLoader` DLL.
+
+### `KSPAssemblyDependencyMax`
+This allows you to specify the maximum version of a dependency that your mod
+supports. If the loaded dependency version is >= than the one specified here
+then your mod assembly will not be loaded.
+
+As an example, the following two attributes would ensure your mod is only
+loaded if a version of `PersistentThrust` in the range v1.7.5 <= v < v1.8.0
+is present:
+```cs
+using KSPPluginLoader;
+
+[assembly: KSPAssemblyDependency("PersistentThrust", 1, 7, 5)]
+[assembly: KSPAssemblyDependencyMax("PersistentThrust", 1, 8, 0)]
+```
+
+## Examples
+### Depending on CryoTanks
+CryoTanks contains DLL called `SimpleBoiloff.dll` but that DLL does not
+have a `KSPAssembly` attribute. With this mod, however, you can ignore
+that by adding the following to your `AssemblyInfo.cs`:
+```cs
+[assembly: KSPAssemblyDependency("SimpleBoiloff", 0, 2, 1)]
+[assembly: KSPAssemblyDependency("KSPPluginLoader", 1, 0)]
+```
+
+### Loading a mod only for a specific set of KSP versions
+Suppose we want to support multiple different KSP versions and have different
+versions of our mod for different KSP versions. You can use a combination of
+`KSPAssemblyDependency` and `KSPAssemblyDependencyMax` to represent this.
+Suppose we only wanted to support KSP v1.8, for example:
+```cs
+[assembly: KSPAssemblyDependency("KSP", 1, 8)]
+[assembly: KSPAssemblyDependencyMax("KSP", 1, 9)]
+[assembly: KSPAssemblyDependency("KSPPluginLoader", 1, 0)]
+```
