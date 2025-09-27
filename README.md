@@ -3,8 +3,8 @@
 This is a KSP mod that allows `KSPAssemblyDependency` attributes to be used to
 depend on other KSP mods that do not have a `KSPAssembly` attribute.
 
-If you are not a mod author then this will show as a dependency of some other
-mod you have installed and you can otherwise ignore it.
+If you are not a mod author then you don't need to worry about what this mod
+does. Just install it as a dependency when requested.
 
 ## How to Use
 1. Add a dependency on `KSPPluginLoader`.
@@ -59,13 +59,13 @@ assembly attributes you can use.
 
 To use these you will need to actually depend on `KSPPluginLoader.dll`.
 They also will not be checked unless your mod DLL has a `KSPAssemblyDependency`
-attribute for `KSPPluginLoader`.
+on `KSPPluginLoader`.
 
 ### Maximum dependency version constraint
-Sometimes you have some code that only works with a small range of mod
-versions. `KSPAssemblyDependency` only lets you set a lower bound, so this
-mod introduces a `KSPAssemblyDependencyMax` assembly attribute that lets
-you set an upper bound on the dependency version.
+You might want to only load your mod if some other mod's version is within a
+certain range. `KSPAssemblyDependency` only lets you set a lower bound, so
+this mod introduces a `KSPAssemblyDependencyMax` which allows you to set an
+upper bound.
 
 Declaring it works pretty much the same as `KSPAssemblyDependency`.
 This would only allow your mod to be loaded if `SomeMod`'s version is
@@ -84,16 +84,29 @@ using KSPPluginLoader;
 [assembly: KSPAssemblyDependencyMax("PersistentThrust", 1, 8, 0)]
 ```
 
-Some things to be aware of when using `KSPAssemblyDependencyMax`:
-* It does not affect the order that assemblies are loaded in. Make sure to
-  pair it with an appropriate `KSPAssemblyDependency` if your mod DLL actually
-  uses the dependency DLL.
-* If there are multiple DLLs with the same name are present then KSP will only
-  load one of them. This happens before constraints like
-  `KSPAssemblyDependencyMax` are taken into account and means that you cannot
-  have multiple DLLs with the same `KSPAssembly` name that use 
-  `KSPAssemblyDependencyMax` to only allow one to load. You can still make this
-  work, however, as long as the DLLs have different names.
+In order for this attribute to make sure to:
+* Add a `KSPAssemblyDependency` on `KSPPluginLoader`. Extra attributes like this
+  are only checked if the DLL depends on `KSPPluginLoader`.
+* Also add a `KSPAssemblyDependency` on the same mod as your
+  `KSPAssemblyDependencyMax`. If you don't do this then then your DLL will never
+  be loaded.
+
+### Assembly Multiversioning
+You can use assembly dependency constraints to load different mod DLLs
+depending on a dependency version. The plugin loader will ensure only
+one copy of any mod with a given name is loaded at a time, but you can use
+dependency constraints to select which ones are considered.
+
+The main use case for this is having multiple different implementations
+for different KSP versions.
+
+For example, here's what you would need to add in order for your mod DLL
+to only be loaded for KSP v1.8:
+```cs
+[assembly: KSPAssemblyDependency("KSP", 1, 8)]
+[assembly: KSPAssemblyDependencyMax("KSP", 1, 9)]
+[assembly: KSPAssemblyDependency("KSPPluginLoader", 1, 0)]
+```
 
 ## Examples
 ### Depending on CryoTanks
@@ -102,16 +115,5 @@ have a `KSPAssembly` attribute. With this mod, however, you can ignore
 that by adding the following to your `AssemblyInfo.cs`:
 ```cs
 [assembly: KSPAssemblyDependency("SimpleBoiloff", 0, 2, 1)]
-[assembly: KSPAssemblyDependency("KSPPluginLoader", 1, 0)]
-```
-
-### Loading a mod only for a specific set of KSP versions
-Suppose we want to support multiple different KSP versions and have different
-versions of our mod for different KSP versions. You can use a combination of
-`KSPAssemblyDependency` and `KSPAssemblyDependencyMax` to represent this.
-Suppose we only wanted to support KSP v1.8, for example:
-```cs
-[assembly: KSPAssemblyDependency("KSP", 1, 8)]
-[assembly: KSPAssemblyDependencyMax("KSP", 1, 9)]
 [assembly: KSPAssemblyDependency("KSPPluginLoader", 1, 0)]
 ```
