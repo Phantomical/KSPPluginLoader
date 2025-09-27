@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices.ComTypes;
 using Mono.Cecil;
+using Smooth.Collections;
 using UnityEngine;
 using static AssemblyLoader;
 
@@ -114,33 +115,46 @@ internal class PluginLoader
         }
     }
 
-    readonly Dictionary<string, PluginInfo> visited = [];
+    readonly Dictionary<string, PluginInfo> visitedNamed = [];
+    readonly Dictionary<string, PluginInfo> visitedPaths = [];
 
     List<LoadedAssembly> TSort()
     {
-        visited.Clear();
+        visitedNamed.Clear();
+        visitedPaths.Clear();
+
         List<LoadedAssembly> sorted = new(plugins.Count);
         foreach (var plugin in plugins)
-            VisitPlugin(plugin, sorted);
+        {
+            // We import by name here so that we always load the assembly with
+            // the greatest version number (subject to constraints).
+            VisitPluginDependency(plugin.Name, sorted);
+        }
         return sorted;
     }
 
     PluginInfo VisitPlugin(PluginInfo plugin, List<LoadedAssembly> sorted)
     {
-        if (visited.TryGetValue(plugin.Name, out var assembly))
+        if (visitedNamed.TryGetValue(plugin.Name, out var assembly))
             return assembly;
 
         assembly = VisitPluginImpl(plugin, sorted);
-        visited[plugin.Name] = assembly;
+        visitedPaths[plugin.Path] = assembly;
         return assembly;
     }
 
     PluginInfo VisitPluginImpl(PluginInfo plugin, List<LoadedAssembly> sorted)
     {
+        if (visitedPaths.TryGetValue(plugin.Path, out var cached))
+            return cached;
+
         // If this plugin has already been loaded then we cannot change that
         // we should always use it.
         if (plugin.assembly.assembly is not null)
+        {
+            visitedNamed[plugin.Name] = plugin;
             return plugin;
+        }
 
         var assembly = plugin.assembly;
         assembly.deps.Clear();
@@ -223,6 +237,7 @@ internal class PluginLoader
         }
 
         sorted.Add(assembly);
+        visitedNamed[plugin.Name] = plugin;
         return plugin;
     }
 
