@@ -10,24 +10,24 @@ using static AssemblyLoader;
 
 namespace KSPPluginLoader;
 
-internal static class PluginLoader
+internal class PluginLoader
 {
     const BindingFlags InstanceFlags =
         BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     const BindingFlags StaticFlags =
         BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
 
-    static readonly FieldInfo ListVersion = typeof(List<LoadedAssembly>).GetField(
+    static readonly FieldInfo ListVersionField = typeof(List<LoadedAssembly>).GetField(
         "_version",
         InstanceFlags
     );
 
-    static readonly FieldInfo ListAssemblies = typeof(LoadedAssembyList).GetField(
+    static readonly FieldInfo ListAssembliesField = typeof(LoadedAssembyList).GetField(
         "assemblies",
         InstanceFlags
     );
 
-    static readonly FieldInfo AvailableAssemblies = typeof(AssemblyLoader).GetField(
+    static readonly FieldInfo AvailableAssembliesField = typeof(AssemblyLoader).GetField(
         "availableAssemblies",
         StaticFlags
     );
@@ -36,58 +36,75 @@ internal static class PluginLoader
         .GetProperty(nameof(LoadedAssembly.dependenciesMet))
         .SetMethod;
 
-    public static void LoadPlugins()
+    static readonly MethodInfo LoadExternalAssemblyMethod = typeof(AssemblyLoader).GetMethod(
+        "LoadExternalAssembly",
+        StaticFlags
+    );
+
+    readonly List<LoadedAssembly> assemblies;
+    readonly List<AssemblyInfo> availableAssemblies;
+    List<PluginInfo> plugins = [];
+    int version;
+    int index;
+    HashSet<LoadedAssembly> known;
+
+    private PluginLoader()
     {
-        var loadedAssemblies = AssemblyLoader.loadedAssemblies;
-        var assemblies = (List<LoadedAssembly>)ListAssemblies.GetValue(loadedAssemblies);
-        var version = (int)ListVersion.GetValue(assemblies);
-        var availableAssemblies = (List<AssemblyInfo>)AvailableAssemblies.GetValue(null);
+        assemblies = (List<LoadedAssembly>)ListAssembliesField.GetValue(loadedAssemblies);
+        version = (int)ListVersionField.GetValue(assemblies);
+        availableAssemblies = (List<AssemblyInfo>)AvailableAssembliesField.GetValue(null);
+        known = [.. assemblies];
 
         // Everything <= this index has already been loaded and should not be
         // modified by us.
-        var index = FindCurrentAssemblyIndex(assemblies);
+        index = FindCurrentAssemblyIndex(assemblies);
         if (index < 0)
             throw new Exception("PluginLoader assembly not present in the list of assemblies");
+    }
 
+    public static void LoadPlugins()
+    {
+        new PluginLoader().LoadPluginsImpl();
+    }
+
+    void LoadPluginsImpl()
+    {
         Debug.Log("PluginLoader: Updating assembly list");
 
-        HashSet<LoadedAssembly> known = [.. assemblies];
         using (var guard = new SilenceLogging())
         {
+            foreach (var assembly in assemblies)
+                plugins.Add(PluginInfo.Load(assembly));
+
             foreach (var file in GameDatabase.Instance.root.GetFiles(UrlDir.FileType.Assembly))
             {
                 var configs = file.parent.GetConfigs("ASSEMBLY", file.name, recursive: false);
                 var node = configs.FirstOrDefault()?.config;
 
-                LoadPlugin(new FileInfo(file.fullPath), file.parent.url, node);
+                var plugin = PluginInfo.Load(new FileInfo(file.fullPath), file.parent.url, node);
+                if (plugin is null)
+                    continue;
+
+                plugins.Add(plugin);
             }
+
+            foreach (var plugin in plugins)
+                plugin.info = availableAssemblies.Find(info => info.name == plugin.assembly.name);
+
+            // This ensures that plugins are processed in the order that they would
+            // have been discovered by KSP if it supported all our features natively.
+            //
+            // We use OrderBy because it is a stable sort and that ensures that the
+            // plugins that have already been loaded will be ordered before any
+            // duplicate copy we read out of the config nodes.
+            plugins = [.. plugins.OrderBy(plugin => plugin.Path)];
         }
 
-        var infos = CreateInfoMap(assemblies, availableAssemblies);
-        for (int i = 0; i < assemblies.Count; ++i)
-        {
-            if (i <= index)
-                continue;
-
-            var assembly = assemblies[i];
-            SetDependenciesMet.Invoke(assembly, [CheckDependencies(assembly, assemblies, infos)]);
-        }
-
-        var tail = new List<LoadedAssembly>(assemblies.Skip(index + 1));
+        var sorted = TSort();
         assemblies.RemoveRange(index + 1, assemblies.Count - (index + 1));
-        tail.RemoveAll(assembly => loadedAssemblies.Contains(assembly.name));
-
-        // We sort by path so that the new dependencies we are adding here are
-        // in the same order they would be if KSP itself was actually loading
-        // them.
-        //
-        // Note that we use linq here because List.Sort is not a stable sort.
-        // If we don't do this we may end up printing extra log messages for
-        // assemblies that have already been validated by KSP.
-        tail = [.. tail.OrderBy(assembly => assembly.path)];
-
-        var sorted = TSort(tail, loadedAssemblies);
         assemblies.AddRange(sorted);
+
+        ListVersionField.SetValue(assemblies, version);
 
         foreach (var assembly in assemblies)
         {
@@ -95,8 +112,144 @@ internal static class PluginLoader
                 continue;
             Debug.Log($"PluginLoader: Loading assembly at {assembly.path}");
         }
+    }
 
-        ListVersion.SetValue(assemblies, version);
+    readonly Dictionary<string, PluginInfo> visited = [];
+
+    List<LoadedAssembly> TSort()
+    {
+        visited.Clear();
+        List<LoadedAssembly> sorted = new(plugins.Count);
+        foreach (var plugin in plugins)
+            VisitPlugin(plugin, sorted);
+        return sorted;
+    }
+
+    PluginInfo VisitPlugin(PluginInfo plugin, List<LoadedAssembly> sorted)
+    {
+        if (visited.TryGetValue(plugin.Name, out var assembly))
+            return assembly;
+
+        assembly = VisitPluginImpl(plugin, sorted);
+        visited[plugin.Name] = assembly;
+        return assembly;
+    }
+
+    PluginInfo VisitPluginImpl(PluginInfo plugin, List<LoadedAssembly> sorted)
+    {
+        // If this plugin has already been loaded then we cannot change that
+        // we should always use it.
+        if (plugin.assembly.assembly is not null)
+            return plugin;
+
+        var assembly = plugin.assembly;
+        assembly.deps.Clear();
+
+        bool satisfied = true;
+        bool allowNonKspDeps = DependsOnPluginLoader(assembly);
+        foreach (var dependency in assembly.dependencies)
+        {
+            bool couldHaveBeenSatisfied = false;
+            var dep = VisitPluginDependency(dependency.name, sorted);
+            if (dep is null)
+                goto UNSATISFIED;
+
+            if (!IsMissingKSPAssembly(dep.assembly))
+            {
+                if (!IsVersionCompatible(dep.assembly, dependency))
+                    goto UNSATISFIED;
+            }
+            else
+            {
+                if (plugin.info is null)
+                    goto UNSATISFIED;
+
+                if (!IsVersionCompatible(dep.Version, dependency))
+                    goto UNSATISFIED;
+
+                if (!allowNonKspDeps)
+                {
+                    couldHaveBeenSatisfied = true;
+                    goto UNSATISFIED;
+                }
+            }
+
+            assembly.deps.Add(dep.assembly);
+            continue;
+
+            UNSATISFIED:
+            satisfied = false;
+
+            if (couldHaveBeenSatisfied)
+            {
+                Debug.LogWarning(
+                    $"PluginLoader: Assembly '{assembly.name}' could have met dependency "
+                        + $"'{dependency.name}' V{dependency.versionMajor}.{dependency.versionMinor}.{dependency.versionRevision} "
+                        + $"if it had a KSPAssemblyDependency on KSPPluginLoader"
+                );
+            }
+            else
+            {
+                Debug.LogWarning(
+                    $"PluginLoader: Assembly '{assembly.name}' has not met dependency "
+                        + $"'{dependency.name}' V{dependency.versionMajor}.{dependency.versionMinor}.{dependency.versionRevision}"
+                );
+            }
+        }
+
+        if (!satisfied)
+            return null;
+
+        if (allowNonKspDeps)
+        {
+            if (plugin.constraints is null)
+            {
+                Debug.LogWarning(
+                    $"PluginLoader: Assembly '{assembly.name}' is not being loaded because its attributes could not be parsed."
+                );
+                return null;
+            }
+
+            foreach (var constraint in plugin.constraints)
+            {
+                if (constraint.IsSatisfied(assembly))
+                    continue;
+
+                Debug.LogWarning(
+                    $"PluginLoader: Assembly '{assembly.name}' is not being loaded because constraint `{constraint}` is not satisfied."
+                );
+                return null;
+            }
+        }
+
+        sorted.Add(assembly);
+        return plugin;
+    }
+
+    PluginInfo VisitPluginDependency(string name, List<LoadedAssembly> sorted)
+    {
+        List<PluginInfo> matching =
+        [
+            .. plugins
+                .Where(plugin => plugin.assembly.name == name)
+                // We use OrderBy because it is a stable sort
+                .OrderBy(plugin => plugin.Version, InverseVersionComparer.Instance),
+        ];
+
+        // Unconditionally prefer any plugins that are already loaded since we
+        // cannot unload them.
+        var loaded = matching.Find(plugin => plugin.assembly.assembly is not null);
+        if (loaded is not null)
+            return VisitPlugin(loaded, sorted);
+
+        foreach (var plugin in matching)
+        {
+            var res = VisitPlugin(plugin, sorted);
+            if (res is not null)
+                return res;
+        }
+
+        return null;
     }
 
     static int FindCurrentAssemblyIndex(List<LoadedAssembly> assemblies)
@@ -132,75 +285,6 @@ internal static class PluginLoader
         }
 
         return infos;
-    }
-
-    static bool CheckDependencies(
-        LoadedAssembly assembly,
-        List<LoadedAssembly> loadedAssemblies,
-        Dictionary<LoadedAssembly, AssemblyInfo> infos
-    )
-    {
-        bool allowNonKspDeps = DependsOnPluginLoader(assembly);
-        bool satisfied = true;
-        foreach (var dependency in assembly.dependencies)
-        {
-            bool couldHaveBeenSatisfied = false;
-
-            foreach (var loadedAssembly in loadedAssemblies)
-            {
-                if (ReferenceEquals(assembly, loadedAssembly))
-                    continue;
-                if (loadedAssembly.name != dependency.name)
-                    continue;
-
-                if (!IsMissingKSPAssembly(loadedAssembly))
-                {
-                    if (!IsVersionCompatible(loadedAssembly, dependency))
-                        continue;
-                }
-                else
-                {
-                    if (!infos.TryGetValue(loadedAssembly, out var info))
-                        continue;
-
-                    if (!IsVersionCompatible(info.assemblyVersion, dependency))
-                        continue;
-
-                    if (!allowNonKspDeps)
-                    {
-                        couldHaveBeenSatisfied = true;
-                        continue;
-                    }
-                }
-
-                dependency.met = true;
-                assembly.deps.Add(loadedAssembly);
-                goto SATISFIED;
-            }
-
-            if (couldHaveBeenSatisfied)
-            {
-                Debug.LogWarning(
-                    $"PluginLoader: Assembly '{assembly.name}' could have met dependency "
-                        + $"'{dependency.name}' V{dependency.versionMajor}.{dependency.versionMinor}.{dependency.versionRevision} "
-                        + $"if it had a KSPAssemblyDependency on KSPPluginLoader"
-                );
-            }
-            else
-            {
-                Debug.LogWarning(
-                    $"PluginLoader: Assembly '{assembly.name}' has not met dependency "
-                        + $"'{dependency.name}' V{dependency.versionMajor}.{dependency.versionMinor}.{dependency.versionRevision}"
-                );
-            }
-
-            satisfied = false;
-
-            SATISFIED:
-            ;
-        }
-
-        return satisfied;
     }
 
     static bool IsVersionCompatible(LoadedAssembly assembly, AssemblyDependency dependency)
@@ -241,77 +325,6 @@ internal static class PluginLoader
         return false;
     }
 
-    static List<LoadedAssembly> TSort(
-        IEnumerable<LoadedAssembly> source,
-        IEnumerable<LoadedAssembly> loadedAssemblies
-    )
-    {
-        List<LoadedAssembly> sorted = [];
-        Dictionary<string, bool> visited = [];
-
-        foreach (var assembly in loadedAssemblies)
-            visited[assembly.path] = assembly.dependenciesMet;
-
-        foreach (var assembly in source)
-            Visit(assembly, visited, sorted);
-
-        return sorted;
-    }
-
-    static bool Visit(
-        LoadedAssembly assembly,
-        Dictionary<string, bool> visited,
-        List<LoadedAssembly> sorted
-    )
-    {
-        if (visited.TryGetValue(assembly.path, out var depsMet))
-            return depsMet;
-
-        visited[assembly.path] = false;
-        if (!assembly.dependenciesMet)
-            return false;
-
-        foreach (var dep in assembly.deps)
-        {
-            if (!Visit(dep, visited, sorted))
-            {
-                Debug.LogWarning(
-                    $"PluginLoader: Assembly '{assembly.name}' has not met dependency "
-                        + $"'{dep.name}' V{dep.versionMajor}.{dep.versionMinor}.{dep.versionRevision}"
-                );
-
-                return false;
-            }
-        }
-
-        if (DependsOnPluginLoader(assembly))
-        {
-            var constraints = LoadAssemblyConstraints(assembly);
-            if (constraints is null)
-            {
-                Debug.LogWarning(
-                    $"PluginLoader: Assembly '{assembly.name}' is not being loaded because its attributes could not be parsed."
-                );
-                return false;
-            }
-
-            foreach (var constraint in constraints)
-            {
-                if (!constraint.IsSatisfied(assembly))
-                {
-                    Debug.LogWarning(
-                        $"PluginLoader: Assembly '{assembly.name}' is not being loaded because constraint `{constraint}` is not satisfied."
-                    );
-                    return false;
-                }
-            }
-        }
-
-        sorted.Add(assembly);
-        visited[assembly.path] = true;
-        return true;
-    }
-
     static List<IAssemblyConstraint> LoadAssemblyConstraints(LoadedAssembly assembly)
     {
         var def = AssemblyDefinition.ReadAssembly(assembly.path);
@@ -330,6 +343,9 @@ internal static class PluginLoader
         }
     }
 
+    static bool LoadExternalAssembly(string path) =>
+        (bool)LoadExternalAssemblyMethod.Invoke(null, [path]);
+
     readonly struct SilenceLogging : IDisposable
     {
         readonly LogType filter = Debug.unityLogger.filterLogType;
@@ -337,5 +353,79 @@ internal static class PluginLoader
         public SilenceLogging() => Debug.unityLogger.filterLogType = LogType.Warning;
 
         public void Dispose() => Debug.unityLogger.filterLogType = filter;
+    }
+
+    class PluginInfo
+    {
+        public LoadedAssembly assembly;
+        public AssemblyInfo info;
+        public List<IAssemblyConstraint> constraints;
+
+        public Version Version
+        {
+            get
+            {
+                if (
+                    assembly.versionMajor == 0
+                    && assembly.versionMinor == 0
+                    && assembly.versionRevision == 0
+                )
+                    return info?.assemblyVersion ?? default;
+                return new(assembly.versionMajor, assembly.versionMinor, assembly.versionRevision);
+            }
+        }
+        public string Name => assembly.name;
+        public string Path => assembly.path;
+
+        public static PluginInfo Load(FileInfo file, string url, ConfigNode assemblyNode)
+        {
+            if (!LoadExternalAssembly(file.FullName))
+                return null;
+
+            LoadedAssembly assembly;
+            try
+            {
+                assembly = new(null, file.FullName, url, assemblyNode);
+            }
+            catch (Exception ex)
+            {
+                string text = ex.ToString();
+                if (ex is ReflectionTypeLoadException exception)
+                {
+                    text += "\n\nAdditional information about this exception:";
+                    Exception[] loaderExceptions = exception.LoaderExceptions;
+                    foreach (Exception ex2 in loaderExceptions)
+                    {
+                        text = text + "\n\n " + ex2.ToString();
+                    }
+                }
+                Debug.LogError($"Exception when loading {file.FullName}: {text}");
+                return null;
+            }
+
+            return Load(assembly);
+        }
+
+        public static PluginInfo Load(LoadedAssembly assembly)
+        {
+            List<IAssemblyConstraint> constraints = null;
+            if (DependsOnPluginLoader(assembly))
+            {
+                constraints = LoadAssemblyConstraints(assembly);
+                if (constraints is null)
+                    return null;
+            }
+
+            return new() { assembly = assembly, constraints = constraints ?? [] };
+        }
+    }
+
+    class InverseVersionComparer : IComparer<Version>
+    {
+        public static readonly InverseVersionComparer Instance = new();
+
+        private InverseVersionComparer() { }
+
+        public int Compare(Version x, Version y) => -x.CompareTo(y);
     }
 }
