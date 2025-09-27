@@ -137,5 +137,9 @@
             <Name>Assembly-CSharp-firstpass</Name>
             <Private>False</Private>
         </Reference>
+        <Reference Include="$(ManagedPath)\Mono.Cecil.dll">
+            <Name>Mono.Cecil</Name>
+            <Private>False</Private>
+        </Reference>
     </ItemGroup>
 </Project>
