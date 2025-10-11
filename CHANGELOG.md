@@ -10,5 +10,12 @@ Note: Spacedock's markdown doesn't recognize lists using `-`, so make sure to
       use `*` for all list entries.
 -->
 
+## Unreleased
+
+## 1.0.1
+### Changed
+* `KSPPluginLoader` is now marked as compatible with all versions of KSP ranging
+  from 1.8 to 1.12
+
 ## 1.0.0
 This is the initial release of KSPPluginLoader.
