@@ -173,6 +173,15 @@ internal class PluginLoader
                 if (!IsVersionCompatible(dep.assembly, dependency))
                     goto UNSATISFIED;
             }
+            else if (
+                dependency.versionMajor == 0
+                && dependency.versionMinor == 0
+                && dependency.versionRevision == 0
+            )
+            {
+                // Mod DLLs can directly depend on assemblies missing KSPAssembly
+                // attributes as long as they put the version as 0.0.0.
+            }
             else
             {
                 if (plugin.info is null)

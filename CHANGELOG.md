@@ -12,6 +12,11 @@ Note: Spacedock's markdown doesn't recognize lists using `-`, so make sure to
 
 ## Unreleased
 
+## 1.1.0
+### Fixed
+* Allow existing direct assembly version dependencies as long as the version
+  constraint is 0.0.0.
+
 ## 1.0.1
 ### Changed
 * `KSPPluginLoader` is now marked as compatible with all versions of KSP ranging
